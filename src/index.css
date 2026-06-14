@@ -1,0 +1,79 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 48 100% 97%;
+    --foreground: 45 10% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 45 10% 12%;
+    --primary: 45 93% 47%;
+    --primary-foreground: 48 100% 97%;
+    --muted: 45 20% 92%;
+    --muted-foreground: 45 10% 45%;
+    --accent: 45 30% 85%;
+    --accent-foreground: 45 10% 12%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 45 20% 82%;
+    --ring: 45 93% 47%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 45 15% 6%;
+    --foreground: 45 10% 90%;
+    --card: 45 15% 9%;
+    --card-foreground: 45 10% 90%;
+    --primary: 45 93% 47%;
+    --primary-foreground: 45 10% 12%;
+    --muted: 45 15% 14%;
+    --muted-foreground: 45 10% 55%;
+    --accent: 45 15% 18%;
+    --accent-foreground: 45 10% 90%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 45 15% 20%;
+    --ring: 45 93% 47%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-muted-foreground/30 rounded-full;
+}
+
+/* Upload drop zone animation */
+@keyframes dash {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.animate-dash {
+  animation: dash 1s linear infinite;
+}
+
+/* Canvas glow */
+.canvas-glow {
+  box-shadow:
+    0 0 30px rgba(245, 197, 24, 0.15),
+    0 0 60px rgba(245, 197, 24, 0.05);
+}
