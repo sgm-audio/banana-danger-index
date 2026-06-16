@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Banana, AlertTriangle } from "lucide-react";
+import { Banana, AlertTriangle, Volume2, VolumeX } from "lucide-react";
 import { Header } from "./components/Header";
 import { UploadZone } from "./components/UploadZone";
 import { ProbabilityGauge } from "./components/ProbabilityGauge";
@@ -8,8 +8,11 @@ import { BananaCanvas } from "./components/BananaCanvas";
 import { ConfettiPeel } from "./components/ConfettiPeel";
 import { PeelFactTicker } from "./components/PeelFactTicker";
 import { WarningBanner } from "./components/WarningBanner";
+import { AbsurdMetricsPanel } from "./components/AbsurdMetricsPanel";
+import { PeelRegistryPanel } from "./components/PeelRegistryPanel";
 import { Button } from "./components/ui/button";
 import { getRandomWarning } from "./data/hazardWarnings";
+import { setMasterVolume, playConfettiChime } from "./lib/audio";
 
 function App() {
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -18,6 +21,7 @@ function App() {
   const [warning, setWarning] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [animKey, setAnimKey] = useState(0);
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const analysisCanvasRef = useRef<HTMLCanvasElement>(null);
 
   const calculateSlipProbability = useCallback(
@@ -74,9 +78,18 @@ function App() {
       setWarning(getRandomWarning());
       setHasAnalyzed(true);
       setAnimKey((k) => k + 1);
+      if (prob >= 80 && soundEnabled) {
+        setMasterVolume(0.2);
+        playConfettiChime();
+      }
     };
     img.src = imageDataUrl;
-  }, [imageDataUrl, calculateSlipProbability]);
+  }, [imageDataUrl, calculateSlipProbability, soundEnabled]);
+
+  // Sync master volume with sound toggle
+  useEffect(() => {
+    setMasterVolume(soundEnabled ? 0.3 : 0);
+  }, [soundEnabled]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -107,15 +120,33 @@ function App() {
       />
 
       <motion.div
-        className="relative max-w-2xl mx-auto px-4 py-8 sm:py-12"
+        className="relative w-full px-4 py-6 sm:py-10"
         variants={containerVariants}
         initial="hidden"
         animate="visible"
       >
+        {/* Sound toggle */}
+        <motion.button
+          onClick={() => setSoundEnabled((s) => !s)}
+          className="fixed top-6 left-6 z-50 flex items-center gap-2 px-3 py-2 rounded-full border border-border/30 bg-card/70 backdrop-blur-md text-xs font-mono hover:bg-primary/10 transition-all"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          title={soundEnabled ? "Mute sound effects" : "Enable sound effects"}
+        >
+          {soundEnabled ? (
+            <Volume2 className="h-4 w-4 text-primary" />
+          ) : (
+            <VolumeX className="h-4 w-4 text-muted-foreground" />
+          )}
+          <span className="hidden sm:inline">{soundEnabled ? "SFX ON" : "SFX OFF"}</span>
+          <span
+            className={`inline-block w-1.5 h-1.5 rounded-full ${soundEnabled ? "bg-green-400" : "bg-red-400"}`}
+          />
+        </motion.button>
         <Header />
 
         <motion.div
-          className="rounded-3xl border border-border/40 bg-card/60 backdrop-blur-xl p-6 sm:p-8 space-y-6 shadow-2xl"
+          className="rounded-3xl border border-border/40 bg-card/60 backdrop-blur-xl p-4 sm:p-6 lg:p-8 space-y-6 shadow-2xl max-w-6xl mx-auto"
           initial={{ opacity: 0, y: 30, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" }}
@@ -157,6 +188,7 @@ function App() {
                 />
                 <PeelFactTicker probability={probability} />
                 <WarningBanner warning={warning} />
+                <AbsurdMetricsPanel probability={probability} />
               </motion.div>
             )}
           </AnimatePresence>
@@ -175,6 +207,8 @@ function App() {
           </motion.p>
         </motion.div>
       </motion.div>
+
+      <PeelRegistryPanel />
     </div>
   );
 }

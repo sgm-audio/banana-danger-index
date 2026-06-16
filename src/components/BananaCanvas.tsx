@@ -1,16 +1,22 @@
 import { useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { getRandomBatmanWord } from "../data/batmanWords";
+import {
+  playSlipSound,
+  playImpactBoom,
+  playCrowdMurmur,
+  playSlowmoWhoosh,
+} from "../lib/audio";
 
 interface BananaCanvasProps {
   slipProbability: number;
   animKey: number;
 }
 
-const CANVAS_W = 600;
-const CANVAS_H = 300;
-const GROUND_Y = 220;
-const PEEL_X = 350;
+const CANVAS_W = 1000;
+const CANVAS_H = 500;
+const GROUND_Y = 370;
+const PEEL_X = 580;
 const PEEL_Y = GROUND_Y - 5;
 
 type Phase = "idle" | "walking" | "slipping" | "fallen" | "comicbook" | "slowmo";
@@ -139,22 +145,44 @@ function drawSpeechBubble(
 ) {
   ctx.save();
 
-  ctx.font = 'bold 10px "Impact", "Arial Black", sans-serif';
+  ctx.font = 'bold 12px "Impact", "Arial Black", sans-serif';
   ctx.textBaseline = "middle";
 
-  const metrics = ctx.measureText(text);
-  const tw = metrics.width;
-  const pad = 6;
-  const bh = 18;
-  const bw = tw + pad * 2;
-  const bx = direction === "left" ? x - bw : x;
-  const by = y - bh - 8;
+  // Available horizontal space from figure x to canvas edge (minus margin)
+  const margin = 12;
+  const availableW = direction === "left" ? x - margin : CANVAS_W - x - margin;
+  // Clamp maxWrap so long phrases wrap, short ones don't
+  const maxWrap = Math.max(60, Math.min(availableW - 16, 180));
 
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.strokeStyle = "#333";
+  const pad = 6;
+  const lineHeight = 18;
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let currentLine = "";
+
+  for (const word of words) {
+    const testLine = currentLine ? currentLine + " " + word : word;
+    const metrics = ctx.measureText(testLine);
+    if (metrics.width > maxWrap && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+
+  const tw = Math.max(...lines.map((l) => ctx.measureText(l).width));
+  const bw = Math.min(tw + pad * 2, availableW);
+  const bh = lines.length * lineHeight + pad;
+  const bx = direction === "left" ? Math.max(4, x - bw) : x;
+  const by = y - bh - 10;
+
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.strokeStyle = "#222";
   ctx.lineWidth = 1.5;
 
-  const r = 5;
+  const r = 6;
   ctx.beginPath();
   ctx.moveTo(bx + r, by);
   ctx.lineTo(bx + bw - r, by);
@@ -171,16 +199,20 @@ function drawSpeechBubble(
 
   // Tail
   ctx.beginPath();
-  ctx.moveTo(x - 3, by + bh);
-  ctx.lineTo(x + 3, by + bh);
-  ctx.lineTo(x, by + bh + 6);
+  ctx.moveTo(x - 5, by + bh);
+  ctx.lineTo(x + 5, by + bh);
+  ctx.lineTo(x, by + bh + 10);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
+  // Draw each line — center on bubble center, NOT figure x
   ctx.fillStyle = "#111";
   ctx.textAlign = "center";
-  ctx.fillText(text, x, by + bh / 2);
+  const startY = by + pad + lineHeight / 2;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], bx + bw / 2, startY + i * lineHeight);
+  }
 
   ctx.restore();
 }
@@ -218,6 +250,12 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
   const slowmoSlipRef = useRef(0);
   const slowmoFallRef = useRef(0);
   const slowmoSparklesRef = useRef<{ x: number; y: number; life: number }[]>([]);
+
+  // Audio trigger guards — fire once per phase
+  const slipSoundFired = useRef(false);
+  const impactSoundFired = useRef(false);
+  const crowdSoundFired = useRef(false);
+  const slowmoSoundFired = useRef(false);
 
   const drawBananaPeel = useCallback(
     (ctx: CanvasRenderingContext2D, x: number, y: number) => {
@@ -510,33 +548,27 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
   const startAnimation = useCallback(() => {
     // Reset all refs
     phaseRef.current = "walking";
-    walkXRef.current = 80;
+    walkXRef.current = 130;
     walkFrameRef.current = 0;
     slipProgressRef.current = 0;
     fallProgressRef.current = 0;
     comicTimeRef.current = 0;
 
-    // Generate a sequence of impact words
-    impactWordsRef.current = [];
-    const count = 3 + Math.floor(Math.random() * 3);
-    for (let i = 0; i < count; i++) {
-      let w = getRandomBatmanWord();
-      // Avoid immediate repeats
-      while (impactWordsRef.current.length > 0 && w === impactWordsRef.current[impactWordsRef.current.length - 1]) {
-        w = getRandomBatmanWord();
-      }
-      impactWordsRef.current.push(w);
-    }
+    // Generate a single impact word
+    impactWordsRef.current = [getRandomBatmanWord()];
 
-    // Generate crowd rubberneckers
+    // Generate crowd rubberneckers — inward-pointing bubbles, no overlap
+    // Left group (fromLeft=true, direction="right", inward): x=60,210,360 (150px gaps)
+    // Right group (fromLeft=false, direction="left", inward): x=648,792,936 (144px gaps)
+    // Center gap 360→648 = 288px = 2 bubble widths, exact meet
     const usedWords: string[] = [];
     const crowd: CrowdMember[] = [
-      { x: 80,  y: GROUND_Y - 15, fromLeft: true,  word: pickReaction(usedWords), pose: "horror" },
-      { x: 145, y: GROUND_Y - 10, fromLeft: true,  word: pickReaction(usedWords), pose: "point" },
-      { x: 210, y: GROUND_Y - 12, fromLeft: true,  word: pickReaction(usedWords), pose: "cover" },
-      { x: 440, y: GROUND_Y - 15, fromLeft: false, word: pickReaction(usedWords), pose: "laugh" },
-      { x: 500, y: GROUND_Y - 10, fromLeft: false, word: pickReaction(usedWords), pose: "facepalm" },
-      { x: 555, y: GROUND_Y - 12, fromLeft: false, word: pickReaction(usedWords), pose: "point" },
+      { x: 60,  y: GROUND_Y - 22, fromLeft: true,  word: pickReaction(usedWords), pose: "horror" },
+      { x: 210, y: GROUND_Y - 15, fromLeft: true,  word: pickReaction(usedWords), pose: "point" },
+      { x: 360, y: GROUND_Y - 18, fromLeft: true,  word: pickReaction(usedWords), pose: "cover" },
+      { x: 648, y: GROUND_Y - 18, fromLeft: false, word: pickReaction(usedWords), pose: "laugh" },
+      { x: 792, y: GROUND_Y - 15, fromLeft: false, word: pickReaction(usedWords), pose: "facepalm" },
+      { x: 936, y: GROUND_Y - 22, fromLeft: false, word: pickReaction(usedWords), pose: "point" },
     ];
     // Shuffle the crowd order so the laugh guy isn't always 4th
     for (let i = crowd.length - 1; i > 0; i--) {
@@ -546,6 +578,12 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
     crowdMembersRef.current = crowd;
     crowdSpawnedRef.current = false;
     crowdEntryProgressRef.current = 0;
+
+    // Reset audio trigger guards
+    slipSoundFired.current = false;
+    impactSoundFired.current = false;
+    crowdSoundFired.current = false;
+    slowmoSoundFired.current = false;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -589,7 +627,7 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
         ctx.fill();
         ctx.restore();
 
-        walkXRef.current += 2;
+        walkXRef.current += 3;
         walkFrameRef.current += 1;
 
         // Arm swing offset
@@ -609,13 +647,17 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
         if (walkXRef.current >= PEEL_X - 5) {
           phaseRef.current = "slipping";
           slipProgressRef.current = 0;
+          if (!slipSoundFired.current) {
+            slipSoundFired.current = true;
+            playSlipSound(slipProbability / 100);
+          }
         }
       } else if (phase === "slipping") {
         const t = slipProgressRef.current;
         // Backward launch
-        const backD = 80 * t;
-        const upD = 70 * Math.sin(t * Math.PI);
-        const cx = Math.max(PEEL_X - backD, 20);
+        const backD = 130 * t;
+        const upD = 110 * Math.sin(t * Math.PI);
+        const cx = Math.max(PEEL_X - backD, 40);
         const cy = GROUND_Y - 30 - upD;
         const rot = -1.4 * t;
 
@@ -694,6 +736,10 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
         if (fallProgressRef.current >= 1) {
           phaseRef.current = "comicbook";
           comicTimeRef.current = 0;
+          if (!impactSoundFired.current) {
+            impactSoundFired.current = true;
+            playImpactBoom(0, slipProbability / 100);
+          }
         }
       } else if (phase === "comicbook") {
         comicTimeRef.current += 1;
@@ -706,11 +752,11 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
         ctx.restore();
 
         // --- COMIC BOOK WORD SEQUENCE ---
-        // Each word appears for ~30 frames, partially overlapping
+        // Single word appears for ~90 frames, slow and deliberate
         const words = impactWordsRef.current;
         const totalWords = words.length;
-        const framesPerWord = 35;
-        const overlap = 10;
+        const framesPerWord = 90;
+        const overlap = 0;
         const ct = comicTimeRef.current;
 
         for (let wi = 0; wi < totalWords; wi++) {
@@ -803,6 +849,10 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
           if (!crowdSpawnedRef.current) {
             crowdSpawnedRef.current = true;
             crowdEntryProgressRef.current = 0;
+            if (!crowdSoundFired.current) {
+              crowdSoundFired.current = true;
+              playCrowdMurmur();
+            }
           }
 
           const entryProgress = Math.min(crowdEntryProgressRef.current, 1);
@@ -834,26 +884,26 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
           }
 
           // Exclamation marks over late-arriving crowd
-          ctx.font = 'bold 10px "Impact", sans-serif';
+          ctx.font = 'bold 14px "Impact", sans-serif';
           for (const m of crowdMembersRef.current) {
             if (entryProgress > 0.5) {
               const bounce = Math.sin(ct * 0.1 + m.x) * 2;
               ctx.fillStyle = `hsl(${40 + m.x * 0.5}, 100%, 60%)`;
               ctx.textAlign = "center";
-              ctx.fillText("!", crowdCx(m), m.y - 38 + bounce);
+              ctx.fillText("!", crowdCx(m), m.y - 55 + bounce);
             }
           }
         }
 
-        // --- Slip index label ---
-        ctx.font = '12px "JetBrains Mono", monospace';
-        ctx.fillStyle = "rgba(255,255,255,0.3)";
+        // --- Slip index label top-left ---
+        ctx.font = '16px "JetBrains Mono", monospace';
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillText(`SLIP INDEX: ${slipProbability}%`, 16, 14);
+        ctx.fillText(`SLIP INDEX: ${slipProbability}%`, 24, 20);
 
-        // Trigger slow-mo replay after the crowd has settled
-        if (ct > 300 && !slowmoActiveRef.current) {
+        // Trigger slow-mo replay after the word finishes
+        if (ct > 120 && !slowmoActiveRef.current) {
           slowmoActiveRef.current = true;
           slowmoFrameRef.current = 0;
           slowmoSubRef.current = "walk";
@@ -861,6 +911,10 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
           slowmoSlipRef.current = 0;
           slowmoFallRef.current = 0;
           slowmoSparklesRef.current = [];
+          if (!slowmoSoundFired.current) {
+            slowmoSoundFired.current = true;
+            playSlowmoWhoosh();
+          }
         }
       } else if (phase === "slowmo") {
         const sf = slowmoFrameRef.current;
@@ -1006,11 +1060,11 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
         ctx.restore();
 
         // --- Slip index label ---
-        ctx.font = '12px "JetBrains Mono", monospace';
-        ctx.fillStyle = "rgba(255,255,255,0.3)";
+        ctx.font = '16px "JetBrains Mono", monospace';
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillText(`SLIP INDEX: ${slipProbability}%`, 16, 14);
+        ctx.fillText(`SLIP INDEX: ${slipProbability}%`, 24, 20);
       }
 
       // --- Screen shake ---
@@ -1081,7 +1135,7 @@ export function BananaCanvas({ slipProbability, animKey }: BananaCanvasProps) {
           ref={canvasRef}
           width={CANVAS_W}
           height={CANVAS_H}
-          className="w-full max-w-[600px] mx-auto rounded-2xl border border-border/50 canvas-glow"
+          className="w-full max-w-[1000px] mx-auto rounded-2xl border border-border/50 canvas-glow"
           style={{
             background:
               "linear-gradient(180deg, rgba(15,15,20,0.95) 0%, rgba(20,18,14,0.98) 100%)",
