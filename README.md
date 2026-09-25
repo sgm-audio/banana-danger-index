@@ -1,5 +1,8 @@
 # Banana Danger Index 🍌⚡
 
+[![Deploy](https://github.com/sgm-audio/banana-danger-index/actions/workflows/deploy.yml/badge.svg)](https://github.com/sgm-audio/banana-danger-index/actions/workflows/deploy.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Upload a banana peel. We'll assess the gravity of the situation using cutting-edge yellowness analysis.
 
 **Warning:** This tool does not account for cartoon physics, but it should.
